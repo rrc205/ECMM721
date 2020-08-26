@@ -1,0 +1,421 @@
+---
+title: "Comparison with Weather"
+output: html_notebook
+---
+
+Import data:
+```{r}
+data = read.csv("C:/Users/beckr/Documents/Uni_Work/Masters/Advanced_Project/Data/Weather/Australia_summer.csv")
+```
+
+Plotting:
+
+Weekend??
+
+
+```{r}
+plot(data$WEEKEND,data$Count, xlab = 'Weekend?', ylab = 'log(ETF)')
+```
+
+Difficult to tell if the weekend is significant in effecting the number of tweets - doesn't seem have the effect we'd expect. (less tweets)
+
+
+Remove zero days:
+```{r}
+#new_data = subset(data, ETF_new != 0)
+new_data = data
+```
+
+
+
+Simple Exponential Model
+
+
+```{r}
+#exponential.model <- lm(log(new_data$ETF_new)~ new_data$MAX)
+exponential.model <- lm(log(data$ETF_new+1)~ data$MAX)
+
+summary(exponential.model)
+```
+
+```{r}
+b = summary(exponential.model)$coefficients[1]
+a = summary(exponential.model)$coefficients[2]
+b_e = summary(exponential.model)$coefficients[3]
+a_e = summary(exponential.model)$coefficients[4]
+```
+
+```{r}
+plot(data$MAX,data$ETF_new, xlab = 'Temperature (Celcius)', ylab = 'log(ETF)')
+
+#jpeg('inexp.jpg')
+
+plot(data$MAX,data$ETF_new, xlab = 'Temperature (Celcius)', ylab = 'ETF')
+
+par(new = TRUE)
+
+curve(exp(a*x+b)-1, from=-5, to=30, axes = FALSE ,  xlab = '', ylab = '', col='blue')
+
+par(new = TRUE)
+curve(exp((a-a_e)*x+b-b_e-1), from=-5, to=30, axes = FALSE , xlab = '', ylab = '',  lty=2, col='red')
+par(new = TRUE)
+curve(exp((a+a_e)*x+b+b_e-1), from=-5, to=30, axes = FALSE , xlab = '', ylab = '', lty=2, col = 'red')
+```
+
+
+General additive model:
+
+```{r}
+gam1 <- gam(ETF_new ~ s(MAX, bs="cr"), data=data)
+
+summary(gam1)
+```
+
+```{r}
+jpeg('ingam.jpg')
+
+plot(gam1, ylab = "ETF")
+```
+
+```{r}
+gam.check(gam1)
+```
+
+```{r}
+plot(new_data$MAX,new_data$ETF_new, xlab = 'Temperature (Celcius)', ylab = 'log(ETF)')
+
+#jpeg('ukexp.jpg')
+
+plot(new_data$MAX,new_data$ETF_new, xlab = 'Temperature (Celcius)', ylab = 'ETF')
+
+par(new = TRUE)
+
+curve(exp(a*x+b)-1, from=-5, to=30, axes = FALSE ,  xlab = '', ylab = '', col='blue')
+
+par(new = TRUE)
+curve(exp((a-a_e)*x+b-b_e-1), from=-5, to=30, axes = FALSE , xlab = '', ylab = '',  lty=2, col='red')
+par(new = TRUE)
+curve(exp((a+a_e)*x+b+b_e-1), from=-5, to=30, axes = FALSE , xlab = '', ylab = '', lty=2, col = 'red')
+```
+
+
+Standardise:
+
+```{r}
+scaled_data = as.data.frame(scale(new_data[c(3,4,5,6,7,8,10,11,12,15)], scale = TRUE, center = FALSE))
+
+
+
+
+new_data = cbind(scaled_data, new_data$WEEKEND)
+```
+
+**Initial Plots**
+
+```{r}
+pairs(new_data[c(2:11)], pch = 19, lower.panel = NULL)
+```
+
+**Models**
+
+Multivariate Adaptive Regression Splines (MARS)
+
+
+```{r}
+set.seed(123)
+split <- initial_split(new_data, prop = .7, strata = "ETF_new")
+train <- training(split)
+test  <- testing(split)
+```
+
+
+```{r}
+mars1 <- earth(
+  ETF_new ~ .,  
+  data = train   
+)
+
+print(summary(mars1))
+```
+
+
+```{r}
+# create a tuning grid
+hyper_grid <- expand.grid(
+  degree = 1:3, 
+  nprune = floor(seq(2, 100, length.out = 10))
+  )
+
+head(hyper_grid)
+```
+
+```{r}
+# for reproducibiity
+set.seed(123)
+
+# cross validated model
+tuned_mars <- train(
+  x = subset(train, select = -ETF_new),
+  y = train$ETF_new,
+  method = "earth",
+  metric = "RMSE",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneGrid = hyper_grid
+)
+
+# best model
+tuned_mars$bestTune
+##    nprune degree
+## 14     34      2
+
+# plot results
+ggplot(tuned_mars)
+```
+
+**Linear Model**
+
+```{r}
+fit <- lm(log(ETF_new+1) ~ TEMP + TEMP_3DAY + TEMP_7DAY + TEMP*DEWP + TEMP*WDSP
+          + TEMP*MXSPD + MAX + MIN + TEMP*PRCP, data = new_data)
+
+print(summary(fit))
+```
+
+```{r}
+
+step(lm(log(ETF_new+1) ~ TEMP + TEMP_3DAY + TEMP_7DAY + TEMP*DEWP + TEMP*WDSP + TEMP*MXSPD + MAX + MIN + TEMP*PRCP, data = new_data), direction = 'both')
+```
+
+UK 
+```{r}
+#fit_new = lm(formula = log(ETF_new+1) ~ TEMP + #TEMP_3DAY + DEWP + MXSPD + 
+#    MAX + MIN + PRCP + TEMP:DEWP + TEMP:PRCP, data = #new_data)
+
+#Summer
+fit_new = lm(formula = log(ETF_new + 1) ~ TEMP + TEMP_3DAY + DEWP + MAX + 
+    MIN + PRCP + TEMP:DEWP, data = new_data)
+
+summary(fit_new)
+```
+
+```{r}
+table = tidy(fit_new)
+kable(table)
+```
+
+Ireland
+```{r}
+#fit_new = lm(formula = log(ETF_new) ~ TEMP + WDSP + MXSPD + MAX + MIN + 
+#    PRCP + TEMP:MXSPD + TEMP:PRCP, data = new_data)
+
+fit_new =lm(formula = log(ETF_new + 1) ~ TEMP + TEMP_7DAY + DEWP + WDSP + 
+    MIN + TEMP:DEWP + TEMP:WDSP, data = new_data)
+
+summary(fit_new)
+```
+
+Australia
+```{r}
+#fit_new = lm(formula = log(ETF_new) ~ TEMP + DEWP + #PRCP + TEMP:DEWP + 
+#    TEMP:PRCP, data = new_data)
+
+fit_new = lm(formula = log(ETF_new + 1) ~ TEMP + TEMP_7DAY + MAX + PRCP + 
+    TEMP:PRCP, data = new_data)
+
+summary(fit_new)
+```
+
+India
+```{r}
+#fit_new = lm(formula = log(ETF_new) ~ TEMP + WDSP + #MAX + MIN + PRCP + 
+#    TEMP:WDSP + TEMP:PRCP, data = new_data)
+
+fit_new = lm(formula = log(ETF_new + 1) ~ TEMP + TEMP_7DAY + DEWP + WDSP + 
+    MXSPD + TEMP:DEWP + TEMP:WDSP, data = new_data)
+
+summary(fit_new)
+```
+
+
+```{r}
+plot(fit_new)
+```
+
+
+Interaction terms:
+We set values for all terms. We set a high value and a low value for the interaction variable with temp. We allow temp to vary and see how ETF is affected:
+
+```{r}
+temp = mean(new_data$TEMP)
+temp3 = mean(new_data$TEMP_3DAY)
+temp7 = mean(new_data$TEMP_7DAY)
+dewp = mean(new_data$DEWP)
+wdsp = mean(new_data$WDSP)
+mxspd = mean(new_data$MXSPD)
+max = mean(new_data$MAX)
+min =mean(new_data$MIN)
+prcp = mean(new_data$PRCP)
+weekend = 0
+```
+
+
+```{r}
+prcp_max = max(new_data$PRCP)
+prcp_min = min(new_data$PRCP)
+
+wdsp_max = max(new_data$WDSP)
+wdsp_min = min(new_data$WDSP)
+
+mxspd_max = max(new_data$MXSPD)
+mxspd_min = min(new_data$MXSPD)
+
+dewp_max = max(new_data$DEWP)
+dewp_min = min(new_data$DEWP)
+```
+
+UK
+
+```{r}
+ETF_dmin = exp(-26.2725512 + 5.7808392*new_data$TEMP + 2.4745839*temp3 +
+            14.9744978*dewp_min + 0.7735362*mxspd + 13.1000051*max +
+            4.4893313*min + 1.9904747*prcp - 16.176963*new_data$TEMP*dewp_min -
+            2.3409757*new_data$TEMP*prcp)
+
+ETF_dmax = exp(-26.2725512 + 5.7808392*new_data$TEMP + 2.4745839*temp3 +
+            14.9744978*dewp_max + 0.7735362*mxspd + 13.1000051*max +
+            4.4893313*min + 1.9904747*prcp - 16.176963*new_data$TEMP*dewp_max -
+            2.3409757*new_data$TEMP*prcp)
+
+plot(new_data$TEMP, ETF_dmin)
+plot(new_data$TEMP, ETF_dmax)
+```
+
+```{r}
+ETF_pmin = exp(-26.2725512 + 5.7808392*new_data$TEMP + 2.4745839*temp3 +
+            14.9744978*dewp + 0.7735362*mxspd + 13.1000051*max +
+            4.4893313*min + 1.9904747*prcp_min - 16.176963*new_data$TEMP*dewp -
+            2.3409757*new_data$TEMP*prcp_min)
+
+ETF_pmax = exp(-26.2725512 + 5.7808392*new_data$TEMP + 2.4745839*temp3 +
+            14.9744978*dewp + 0.7735362*mxspd + 13.1000051*max +
+            4.4893313*min + 1.9904747*prcp_max - 16.176963*new_data$TEMP*dewp -
+            2.3409757*new_data$TEMP*prcp_max)
+
+plot(new_data$TEMP, ETF_pmin)
+plot(new_data$TEMP, ETF_pmax)
+```
+
+Summer
+```{r}
+ETF_dmin = 3.8832656 - 4.629717*new_data$TEMP +                 0.6433902*temp3 - 6.2306876*dewp_min +               1.2842197*max + 0.5262339*min + 0.0596073            * prcp + 4.7423341*new_data$TEMP*dewp_min
+
+
+ETF_dmax = 3.8832656 - 4.629717*new_data$TEMP +                 0.6433902*temp3 - 6.2306876*dewp_max +               1.2842197*max + 0.5262339*min + 0.0596073            * prcp + 4.7423341*new_data$TEMP*dewp_max
+
+plot(new_data$TEMP, ETF_dmin)
+plot(new_data$TEMP, ETF_dmax)
+```
+
+
+
+
+
+Ireland
+```{r}
+ETF_pmin = exp(-20.554282 + 32.790625*new_data$TEMP - 2.348689*wdsp + 13.75217*mxspd - 
+        8.964237*max - 3.139045*min + 5.451739*prcp_min - 13.227612*new_data$TEMP -
+        6.775392*new_data$TEMP*prcp_min)
+
+ETF_pmax = exp(-20.554282 + 32.790625*new_data$TEMP - 2.348689*wdsp + 13.75217*mxspd - 
+        8.964237*max - 3.139045*min + 5.451739*prcp_max - 
+        13.227612*new_data$TEMP*mxspd - 6.775392*new_data$TEMP*prcp_max)
+
+plot(new_data$TEMP, ETF_pmin)
+plot(new_data$TEMP, ETF_pmax)
+
+```
+
+```{r}
+
+ETF_mmin = exp(-20.554282 + 32.790625*new_data$TEMP - 2.348689*wdsp + 13.75217*mxspd_min - 
+        8.964237*max - 3.139045*min + 5.451739*prcp - 
+        13.227612*new_data$TEMP*mxspd_min - 6.775392*new_data$TEMP*prcp)
+
+ETF_mmax = exp(-20.554282 + 32.790625*new_data$TEMP - 2.348689*wdsp + 13.75217*mxspd_max - 
+        8.964237*max - 3.139045*min + 5.451739*prcp - 
+        13.227612*new_data$TEMP*mxspd_max - 6.775392*new_data$TEMP*prcp)
+
+plot(new_data$TEMP, ETF_mmin)
+plot(new_data$TEMP, ETF_mmax)
+```
+
+
+Australia
+```{r}
+ETF_dmax = exp(4.9512199 - 0.0487092*new_data$TEMP - 0.1188323*dewp_max + 9.7076976*prcp +
+            0.0080329 *new_data$TEMP*dewp_max - 0.8428927*new_data$TEMP*prcp)
+
+
+ETF_dmin = exp(4.9512199 - 0.0487092*new_data$TEMP - 0.1188323*dewp_min + 9.7076976*prcp +
+            0.0080329 *new_data$TEMP*dewp_min - 0.8428927*new_data$TEMP*prcp)
+
+
+plot(new_data$TEMP, ETF_dmin)
+plot(new_data$TEMP, ETF_dmax)
+```
+```{r}
+ETF_pmax = exp(4.9512199 - 0.0487092*new_data$TEMP - 0.1188323*dewp + 9.7076976*prcp_max +
+            0.0080329 *new_data$TEMP*dewp - 0.8428927*new_data$TEMP*prcp_max)
+
+
+ETF_pmin = exp(4.9512199 - 0.0487092*new_data$TEMP - 0.1188323*dewp + 9.7076976*prcp_min +
+            0.0080329 *new_data$TEMP*dewp - 0.8428927*new_data$TEMP*prcp_min)
+
+
+plot(new_data$TEMP, ETF_pmin)
+plot(new_data$TEMP, ETF_pmax)
+```
+
+Summer
+```{r}
+ETF_pmin = -1.6357237 + 0.216788*new_data$TEMP + 
+            0.5617582*temp7 + 1.1593977*max +
+            0.3482352*prcp_min - 
+            0.4832481*new_data$TEMP*prcp_min
+
+ETF_pmax = -1.6357237 + 0.216788*new_data$TEMP + 
+            0.5617582*temp7 + 1.1593977*max +
+            0.3482352*prcp_max - 
+            0.4832481*new_data$TEMP*prcp_max
+
+
+plot(new_data$TEMP, ETF_pmin)
+plot(new_data$TEMP, ETF_pmax)
+```
+
+
+
+
+India
+```{r}
+ETF_dmin = - 12.8372207 + 12.7706336*new_data$TEMP + 0.9204825*temp7 + 10.9060787*dewp_min + 1.6921433*wdsp -0.16894*mxspd - 11.5627849*new_data$TEMP*dewp_min - 1.6083276 *new_data$TEMP*wdsp
+
+ETF_dmax = - 12.8372207 + 12.7706336*new_data$TEMP + 0.9204825*temp7 + 10.9060787*dewp_max + 1.6921433*wdsp -0.16894*mxspd - 11.5627849*new_data$TEMP*dewp_max - 1.6083276 *new_data$TEMP*wdsp
+
+plot(new_data$TEMP, ETF_dmin)
+plot(new_data$TEMP, ETF_dmax)
+```
+
+
+
+```{r}
+ETF_wmin = - 12.8372207 + 12.7706336*new_data$TEMP + 0.9204825*temp7 + 10.9060787*dewp + 1.6921433*wdsp_min -0.16894*mxspd - 11.5627849*new_data$TEMP*dewp - 1.6083276 *new_data$TEMP*wdsp_min
+
+ETF_wmax = - 12.8372207 + 12.7706336*new_data$TEMP + 0.9204825*temp7 + 10.9060787*dewp + 1.6921433*wdsp_max -0.16894*mxspd - 11.5627849*new_data$TEMP*dewp - 1.6083276 *new_data$TEMP*wdsp_max
+
+plot(new_data$TEMP, ETF_wmin)
+plot(new_data$TEMP, ETF_wmax)
+```
+
+
+
